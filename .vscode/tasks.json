@@ -1,0 +1,35 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"type": "shell",
+			"label": "BUILD with west",
+			"command": "./west.sh",
+			"options" : {
+				"cwd" : "${workspaceRoot}"
+			},
+			"args": [
+				"build"
+			],
+			"problemMatcher": {
+				"base" : "$gcc",
+				"fileLocation": ["relative", "${workspaceRoot}/build"]
+			},
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			}
+		},
+		{
+			"type": "shell",
+			"label": "FLASH with west",
+			"command": "./west.sh",
+			"options" : {
+				"cwd" : "${workspaceRoot}"
+			},
+			"args": [
+				"flash"
+			]
+		}
+	]
+}

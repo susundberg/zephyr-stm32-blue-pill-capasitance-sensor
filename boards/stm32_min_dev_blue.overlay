@@ -4,14 +4,27 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+ 
+/ {
 
-&adc1 {
-	status = "okay";
+        cap-gpio-out {
+                compatible = "gpio-leds";
+                cap-out {
+                        gpios = <&gpiob 5 GPIO_ACTIVE_HIGH>;
+                        label = "cap-output";
+                };
+        };
 
-	adc_map {
-	    compatible="adc-map";
-	    io-channels = <&adc1 10>, <&adc1 42>; 
-	    io-channel-names = "SENSOR", "BANDGAP";
-	};
+		cap-gpio-in
+		{
+			compatible =  "gpio-keys";
+			cap-in {
+				gpios = <&gpiob 4 GPIO_ACTIVE_HIGH >;
+				label = "cap-input";
+				
+		};
+
+
+		}; 
 
 };
