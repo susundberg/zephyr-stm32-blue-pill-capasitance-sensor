@@ -1,8 +1,4 @@
-/*
- * Copyright (c) 2019 Nordic Semiconductor ASA
- *
- * SPDX-License-Identifier: Apache-2.0
- */
+
 
 #include <zephyr.h>
 #include <device.h>
@@ -15,24 +11,27 @@
 
 /* 1000 msec = 1 sec */
 #define SLEEP_TIME_MS 200
+#define RET_CHECK(x) { int32_t __ret_check = (x); if ( __ret_check != 0 ) { LOG_ERR("Call failed: %d", __ret_check ); __ASSERT_NO_MSG(0);}};
 
-/* The devicetree node identifier for the "led0" alias. */
-#define LED0_NODE DT_ALIAS(led0)
 
-#if DT_HAS_NODE_STATUS_OKAY(LED0_NODE)
-#define LED0 DT_GPIO_LABEL(LED0_NODE, gpios)
-#define PIN DT_GPIO_PIN(LED0_NODE, gpios)
-#if DT_PHA_HAS_CELL(LED0_NODE, gpios, flags)
-#define FLAGS DT_GPIO_FLAGS(LED0_NODE, gpios)
-#endif
-#else
-/* A build error here means your board isn't set up to blink an LED. */
-#error "Unsupported board: led0 devicetree alias is not defined"
-#define LED0 ""
-#define PIN 0
-#endif
+
 
 LOG_MODULE_REGISTER(main);
+
+#define LOCAL_queue_n 4
+static struct k_msgq LOCAL_queue ;
+static u32_t LOCAL_queue_buffer[ LOCAL_queue_n ];
+
+static struct gpio_callback LOCAL_ISR_signal;
+
+static void signal_isr(struct device* gpiob, struct gpio_callback* cb, u32_t pins)
+{
+    (void)gpiob;
+    (void)pins;
+    (void)cb;
+	u32_t end_time = k_cycle_get_32();
+	k_msgq_put( &LOCAL_queue, &end_time, K_NO_WAIT );
+}
 
 void get_and_check(struct device **dev, const char *label, u32_t pin, uint32_t flags)
 {
@@ -52,7 +51,7 @@ void get_and_check(struct device **dev, const char *label, u32_t pin, uint32_t f
 	if (ret < 0)
 	{
 		LOG_ERR("Configuration failed:%d", ret);
-		__ASSERT_NO_MSG(0);
+		// __ASSERT_NO_MSG(0);
 		return;
 	}
 }
@@ -62,7 +61,7 @@ void get_and_check(struct device **dev, const char *label, u32_t pin, uint32_t f
 	{                                                                                             \
 		get_and_check(dev, DT_GPIO_##name##_GPIOS_CONTROLLER, DT_GPIO_##name##_GPIOS_PIN, flags); \
 	}
-static const int MAX_LOOP_TO_GO = 20000;
+
 void main(void)
 {
 	LOG_INF("Main started!");
@@ -76,23 +75,33 @@ void main(void)
 	GPIO_CONFIGURE(&dev_led, LEDS_LED0, GPIO_OUTPUT_ACTIVE | GPIO_ACTIVE_HIGH | GPIO_OUTPUT);
 	GPIO_CONFIGURE(&dev_cap_out, LEDS_CAP_OUT, GPIO_OUTPUT_ACTIVE | GPIO_ACTIVE_HIGH | GPIO_OUTPUT);
 	GPIO_CONFIGURE(&dev_cap_in, KEYS_CAP_IN, GPIO_INPUT | GPIO_ACTIVE_HIGH | GPIO_OUTPUT | GPIO_OPEN_DRAIN);
+
+    k_msgq_init( &LOCAL_queue, (char*)LOCAL_queue_buffer, 4, LOCAL_queue_n );
+
+	gpio_init_callback( &LOCAL_ISR_signal, signal_isr, BIT( GPIO_PIN(KEYS_CAP_IN) ) );
+    RET_CHECK( gpio_add_callback( dev_cap_in, &LOCAL_ISR_signal) );
+    RET_CHECK( gpio_pin_interrupt_configure( dev_cap_in, GPIO_PIN(KEYS_CAP_IN), GPIO_INT_EDGE_RISING) );
+
+
 	//	GPIO_CONFIGURE(&dev_cap_in, KEYS_CAP_IN ,  GPIO_ACTIVE_HIGH| GPIO_OUTPUT  );
 
 	u32_t filtered = 0;
+	u32_t dtime = 0;
 	u32_t mainloop = 0;
 	for (;;)
 	{
 		mainloop += 1;
-		gpio_pin_set(dev_led, PIN, (int)led_is_on);
+		gpio_pin_set(dev_led, GPIO_PIN(LEDS_LED0), (int)led_is_on);
 		led_is_on = !led_is_on;
-		 k_msleep(SLEEP_TIME_MS);
+		// k_msleep(SLEEP_TIME_MS);
 
 		// Empty charge
 		gpio_pin_set(dev_cap_out, GPIO_PIN(LEDS_CAP_OUT), 0);
 		gpio_pin_set(dev_cap_in, GPIO_PIN(KEYS_CAP_IN), 0);
+		k_msgq_purge( &LOCAL_queue );
 		k_msleep(10);
 
-		u32_t start_time = k_cycle_get_32();
+		
 
 		uint32_t pin_value = gpio_pin_get(dev_cap_in, GPIO_PIN(KEYS_CAP_IN));
 
@@ -104,35 +113,45 @@ void main(void)
 
 		// Start charge
 		gpio_pin_set(dev_cap_in, GPIO_PIN(KEYS_CAP_IN), 1);
+		u32_t start_time = k_cycle_get_32();
+		
 		gpio_pin_set(dev_cap_out, GPIO_PIN(LEDS_CAP_OUT), 1);
-
-		// wait for while
-		u32_t loop;
-		for (loop = 0; loop < MAX_LOOP_TO_GO; loop++)
+		
+		u32_t end_time = 0;
+		if ( k_msgq_get( &LOCAL_queue, &end_time, K_MSEC( SLEEP_TIME_MS ) ) == 0  )
 		{
-			pin_value = gpio_pin_get(dev_cap_in, GPIO_PIN(KEYS_CAP_IN));
-
-			if (pin_value == 0)
-				continue;
-
-			break;
-		}
-		u32_t end_time = k_cycle_get_32();
-
-		if (loop >= MAX_LOOP_TO_GO)
-		{
-			LOG_INF("Did not raise!");
+			// Got new message
+			if ( end_time > start_time )
+			{
+			   dtime = (u32_t) ( k_cyc_to_ns_floor64(end_time - start_time) );
+			   filtered = (950 * filtered + 50 * dtime + 500) / 1000;
+			   
+			}
+			else
+			{
+				dtime = 0;
+				LOG_INF("Overflow!");
+			}
 		}
 		else
 		{
-			//u32_t dtime = (u32_t)k_cyc_to_ns_floor64(end_time - start_time);
-			//LOG_INF("Time: %d / %d", dtime, loop );
+			dtime = 1;
+			LOG_INF("Did not observe signal!");
+		}
+		
+		
+		if ( ( mainloop > 10 ) != 0 )
+		{
+			const char* stype = "    ";
+			if ( filtered >= 80000 )
+			{
+				stype = ("SOIL");
+			}
 
-			filtered = (90 * filtered + 10 * loop + 50) / 100;
+			LOG_INF("%s        Time: %d / %d", stype, filtered, dtime );
+			mainloop = 0;
 		}
 
-
-			LOG_INF("Output :%d  (%d)", filtered, loop);
 
 	}
 }
