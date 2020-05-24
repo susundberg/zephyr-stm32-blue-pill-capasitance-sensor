@@ -10,3 +10,6 @@ PB4 ----------------|
 Notes: THe PB4 did not work until the JTAG mode had the reset disabled; CONFIG_GPIO_STM32_SWJ_NONJTRST
 
 
+The idea came from: 
+https://wiki.ardumower.de/index.php?title=Lawn_sensor
+
