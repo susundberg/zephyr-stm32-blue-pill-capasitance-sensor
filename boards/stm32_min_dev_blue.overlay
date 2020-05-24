@@ -1,0 +1,17 @@
+/*
+ * Copyright (c) 2019 Nordic Semiconductor ASA
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+
+&adc1 {
+	status = "okay";
+
+	adc_map {
+	    compatible="adc-map";
+	    io-channels = <&adc1 10>, <&adc1 42>; 
+	    io-channel-names = "SENSOR", "BANDGAP";
+	};
+
+};
